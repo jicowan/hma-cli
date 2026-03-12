@@ -1,0 +1,21 @@
+# Binaries (at root level only)
+/hma-cli
+/hma-cli-linux-*
+*.exe
+
+# Test coverage
+coverage.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
