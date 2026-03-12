@@ -28,17 +28,20 @@ make build-linux
 ## Usage
 
 ```bash
-hma-cli [--node <node-name>] <category> <failure-type> [flags]
+hma-cli --node <node-name> <category> <failure-type> [flags]
 ```
+
+**Important:** The `--node` flag is required for all simulations. The CLI creates a privileged pod on the target node to execute commands.
 
 ### Global Flags
 
 | Flag | Description |
 |------|-------------|
-| `--node` | Target node name (creates privileged pod automatically) |
+| `--node` | **Required.** Target node name (creates privileged pod automatically) |
+| `--keep-alive` | Keep simulation running for duration (e.g., `30m`). **Required for process-based simulations.** |
 | `--kubeconfig` | Path to kubeconfig (default: ~/.kube/config) |
 | `--dry-run` | Show what would happen without executing |
-| `--duration` | Auto-cleanup after duration (e.g., 5m) |
+| `--duration` | Auto-cleanup after duration (e.g., `5m`) |
 | `--force` | Skip confirmation prompts |
 | `--cleanup` | Revert a previous simulation |
 
@@ -48,55 +51,62 @@ hma-cli [--node <node-name>] <category> <failure-type> [flags]
 
 ```bash
 # Create zombie processes (threshold: >= 20)
-hma-cli kernel zombies --count 25
+# Requires --keep-alive to prevent processes from being killed on pod exit
+hma-cli --node <node-name> kernel zombies --count 25 --keep-alive 30m --force
 
-# Exhaust PIDs (threshold: > 70%)
-hma-cli kernel pid-exhaustion
+# Exhaust PIDs (threshold: > 70% of MAX(pid_max, threads-max))
+# Requires --keep-alive to keep sleep processes alive
+hma-cli --node <node-name> kernel pid-exhaustion --keep-alive 30m --force
 
-# Inject kernel log patterns
-hma-cli kernel fork-oom
-hma-cli kernel kernel-bug
-hma-cli kernel soft-lockup
+# Inject kernel log patterns (dmesg injection, no --keep-alive needed)
+hma-cli --node <node-name> kernel kernel-bug --force    # Creates Warning event
+hma-cli --node <node-name> kernel soft-lockup --force   # Creates Warning event
 ```
+
+> **Note:** `fork-oom` is not supported because NMA watches kubelet journal for fork failures, not dmesg.
 
 ### Networking (`NetworkingReady` condition)
 
 ```bash
-# Kill IPAMD process
-hma-cli networking ipamd-down
+# Kill IPAMD process - triggers NetworkingReady=False
+hma-cli --node <node-name> networking ipamd-down --force
 
-# Delete VPC routes
-hma-cli networking routes-missing
+# Bring down secondary ENI (eth1) - triggers NetworkingReady=False
+hma-cli --node <node-name> networking interface-down --force
 
-# Bring down secondary ENI
-hma-cli networking interface-down --target eth1
+# Delete pod routes (requires pods with allocated IPs on the node)
+hma-cli --node <node-name> networking routes-missing --force
 ```
 
 ### Storage (`StorageReady` condition)
 
 ```bash
-# Create I/O pressure (requires stress-ng)
-hma-cli storage io-delay
+# Create I/O delay process (NMA checks every 10 minutes)
+# Requires --keep-alive for at least 15 minutes
+hma-cli --node <node-name> storage io-delay --keep-alive 15m --force
 ```
 
 ### Runtime (`ContainerRuntimeReady` condition)
 
 ```bash
-# Restart kubelet repeatedly (threshold: > 3 in 5 min)
-hma-cli runtime systemd-restarts --service kubelet --count 4
+# Kill kubelet process repeatedly to increment NRestarts counter
+# NMA threshold: NRestarts > 3 AND increasing
+# Requires --keep-alive to complete all kills
+hma-cli --node <node-name> runtime systemd-restarts --keep-alive 10m --force
 ```
 
 ### Accelerator (`AcceleratedHardwareReady` condition)
 
 ```bash
-# Inject NVIDIA XID error (fatal codes: 13, 31, 48, 63, 64, 74, 79, 94, 95, 119, 120, 121, 140)
-hma-cli accelerator xid-error --code 79
+# Inject NVIDIA XID error (requires DCGM installed)
+# Fatal codes: 13, 31, 48, 63, 64, 74, 79, 94, 95, 119, 120, 121, 140
+hma-cli --node <node-name> accelerator xid-error --code 79 --force
 
-# Inject AWS Neuron errors
-hma-cli accelerator neuron-sram-error
-hma-cli accelerator neuron-hbm-error
-hma-cli accelerator neuron-nc-error
-hma-cli accelerator neuron-dma-error
+# Inject AWS Neuron errors (dmesg injection)
+hma-cli --node <node-name> accelerator neuron-sram-error --force
+hma-cli --node <node-name> accelerator neuron-hbm-error --force
+hma-cli --node <node-name> accelerator neuron-nc-error --force
+hma-cli --node <node-name> accelerator neuron-dma-error --force
 ```
 
 ### NodeDiagnostic (Log Collection)
@@ -105,44 +115,36 @@ Create a `NodeDiagnostic` CR to collect logs from a node:
 
 ```bash
 # Create NodeDiagnostic CR
-hma-cli diagnose --node ip-10-0-1-123.ec2.internal \
+hma-cli diagnose --node <node-name> \
   --destination "https://mybucket.s3.amazonaws.com/logs.tar.gz?X-Amz-..."
 
 # Wait for completion
-hma-cli diagnose --node my-node --destination "https://..." --wait
+hma-cli diagnose --node <node-name> --destination "https://..." --wait
 
 # Check status
-hma-cli diagnose --node my-node --status
+hma-cli diagnose --node <node-name> --status
 
 # Create, wait, then delete
-hma-cli diagnose --node my-node --destination "https://..." --wait --delete
+hma-cli diagnose --node <node-name> --destination "https://..." --wait --delete
 ```
+
+## Understanding `--keep-alive`
+
+Some simulations create processes that must remain running for NMA to detect them. Without `--keep-alive`, the node-shell pod is deleted immediately after running the command, which kills all child processes.
+
+| Simulation | Needs `--keep-alive` | Reason |
+|------------|---------------------|--------|
+| `zombies` | Yes (30m recommended) | Zombie processes killed on pod exit |
+| `pid-exhaustion` | Yes (30m recommended) | Sleep processes killed on pod exit |
+| `io-delay` | Yes (15m recommended) | Worker process killed; NMA checks every 10 min |
+| `systemd-restarts` | Yes (10m recommended) | Background kill script needs time to complete |
+| `kernel-bug` | No | Dmesg injection is instant |
+| `soft-lockup` | No | Dmesg injection is instant |
+| `ipamd-down` | No | Process kill is instant |
+| `interface-down` | No | Interface state change is instant |
+| `neuron-*` | No | Dmesg injection is instant |
 
 ## Examples
-
-### Dry Run
-
-See what a simulation would do without executing:
-
-```bash
-hma-cli kernel zombies --dry-run
-```
-
-### Auto-Cleanup
-
-Automatically revert after a duration:
-
-```bash
-hma-cli kernel zombies --duration 2m
-```
-
-### Manual Cleanup
-
-Revert a simulation manually:
-
-```bash
-hma-cli kernel zombies --cleanup
-```
 
 ### List All Simulations
 
@@ -150,24 +152,54 @@ hma-cli kernel zombies --cleanup
 hma-cli list
 ```
 
+### Dry Run
+
+See what a simulation would do without executing:
+
+```bash
+hma-cli --node <node-name> kernel zombies --dry-run
+```
+
+### Manual Cleanup
+
+Revert a simulation manually:
+
+```bash
+hma-cli --node <node-name> kernel zombies --cleanup --force
+hma-cli --node <node-name> networking interface-down --cleanup --force
+```
+
 ## Verification
 
 After running a simulation, verify NMA detection:
 
 ```bash
-# Check NMA logs
-kubectl logs -n kube-system -l app=eks-node-monitoring-agent
-
 # Check node conditions
-kubectl get node <node-name> -o jsonpath='{.status.conditions}' | jq
+kubectl get node <node-name> -o json | jq '.status.conditions[] | select(.type | test("Kernel|Network|Storage|Runtime|Accelerated"))'
+
+# Check node events (for Warning-level detections)
+kubectl get events --field-selector involvedObject.name=<node-name> --sort-by='.lastTimestamp'
+
+# Check NMA logs on the node
+NMA_POD=$(kubectl get pods -n kube-system -o wide | grep eks-node-monitoring | grep <node-name> | awk '{print $1}')
+kubectl logs -n kube-system $NMA_POD --tail=100
 ```
+
+## NMA Detection Levels
+
+The NMA has two detection levels:
+
+| Level | Effect | Examples |
+|-------|--------|----------|
+| **CONDITION** | Changes node condition to `False` | `ipamd-down`, `interface-down`, `neuron-*` |
+| **EVENT** | Creates Warning event only (condition stays `True`) | `zombies`, `kernel-bug`, `soft-lockup` |
 
 ## Requirements
 
 - Go 1.21+ (for building)
-- Root/sudo access on target node
-- `stress-ng` for storage simulations (optional)
-- kubectl access to EKS cluster (for `--node` flag and `diagnose` command)
+- kubectl access to EKS cluster
+- Cluster must have NMA installed
+- For GPU simulations: DCGM must be installed on GPU nodes
 
 ## Development
 
@@ -193,16 +225,17 @@ When using `--node`, the CLI:
 1. Creates a privileged pod on the target node
 2. Uses `nsenter` to enter the node's namespaces
 3. Executes simulation commands
-4. Cleans up the pod when done
+4. Keeps the pod alive if `--keep-alive` is specified
+5. Cleans up the pod when done
 
-### Failure Detection
+### NMA Detection Patterns
 
 The NMA monitors:
-- **Kernel**: `/proc` filesystem, dmesg patterns
-- **Networking**: IPAMD process, routes, interfaces
-- **Storage**: I/O latency, EBS metrics
-- **Runtime**: systemd service restarts
-- **Accelerator**: NVIDIA DCGM, Neuron dmesg patterns
+- **Kernel**: Zombie count (>=20), PID usage (>70%), dmesg patterns (`BUG:`, `soft lockup`)
+- **Networking**: IPAMD process, interface state, pod routes from IPAMD checkpoint
+- **Storage**: Per-process I/O delay from `/proc/[PID]/stat` (>10s)
+- **Runtime**: systemd NRestarts counter via dbus (>3 and increasing)
+- **Accelerator**: NVIDIA XID errors via DCGM, Neuron errors via dmesg
 
 ## License
 
