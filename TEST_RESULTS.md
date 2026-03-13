@@ -88,27 +88,11 @@ Simulations that create processes require `--keep-alive` flag. Without it, proce
 | NRestarts > 3 | Sets ContainerRuntimeReady=False | CONDITION |
 | I/O delay > 10s | Sets StorageReady=False | CONDITION |
 
-### 3. Fixes Applied
-
-| Simulation | Issue | Fix |
-|------------|-------|-----|
-| `pid-exhaustion` | Only lowered pid_max | Now lowers both pid_max AND threads-max |
-| `kernel-bug` | Pattern didn't match NMA regex | Changed to `[timestamp] BUG: message` format |
-| `soft-lockup` | Missing process name | Added `[process:pid]` at end of pattern |
-| `systemd-restarts` | `systemctl restart` doesn't increment NRestarts | Changed to SIGKILL approach |
-| `io-delay` | stress-ng doesn't cause measurable delay | Created sync write worker with fsync |
-
-### 4. Destructive Simulations (Use with Caution)
+### 3. Destructive Simulations (Use with Caution)
 
 | Simulation | Warning |
 |------------|---------|
 | `fork-oom` | **DESTRUCTIVE**: Exhausts node PIDs, node becomes unrecoverable and must be deleted/replaced |
-
-### 5. Removed Simulations
-
-| Simulation | Reason for Removal |
-|------------|-------------------|
-| `routes-missing` | Kubernetes auto-heals: deleting routes causes pods to restart, IPAMD reallocates IPs before NMA can detect |
 
 ## Recommended Usage
 
