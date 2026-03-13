@@ -125,7 +125,7 @@ func (d *DmesgSimulator) CleanupCommand() []string {
 }
 
 func init() {
-	simulator.Register(NewForkOOMSimulator())
+	// fork-oom is now registered in forkoom.go with proper implementation
 	simulator.Register(NewKernelBugSimulator())
 	simulator.Register(NewSoftLockupSimulator())
 }

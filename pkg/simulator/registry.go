@@ -44,6 +44,13 @@ func (r *Registry) Get(name string) (Simulator, bool) {
 	return sim, ok
 }
 
+// Unregister removes a simulator from the registry
+func (r *Registry) Unregister(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.simulators, name)
+}
+
 // List returns all registered simulators
 func (r *Registry) List() []Simulator {
 	r.mu.RLock()
@@ -78,6 +85,11 @@ func Register(sim Simulator) error {
 // Get retrieves a simulator from the global registry
 func Get(name string) (Simulator, bool) {
 	return globalRegistry.Get(name)
+}
+
+// Unregister removes a simulator from the global registry
+func Unregister(name string) {
+	globalRegistry.Unregister(name)
 }
 
 // List returns all simulators from the global registry

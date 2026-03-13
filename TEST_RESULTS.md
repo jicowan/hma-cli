@@ -20,7 +20,7 @@ Test Date: 2026-03-12
 | `kernel-bug` | Multiple | ✅ PASS | Warning Event | Dmesg injection works, pattern: `[timestamp] BUG: message` |
 | `soft-lockup` | Multiple | ✅ PASS | Warning Event | Dmesg injection works, pattern includes process name |
 | `pid-exhaustion` | ip-10-0-3-62 | ✅ PASS | Pending | Achieved 74% PID usage, requires `--keep-alive 30m` |
-| `fork-oom` | N/A | ❌ NOT SUPPORTED | N/A | NMA watches kubelet journal, not dmesg |
+| `fork-oom` | ip-10-0-4-11 | ✅ PASS | KernelReady=False | **WARNING: Node became unrecoverable, required deletion** |
 
 ### Networking Simulations
 
@@ -56,12 +56,12 @@ Test Date: 2026-03-12
 
 | Category | Total | Pass | Partial | Fail | Skipped |
 |----------|-------|------|---------|------|---------|
-| Kernel | 5 | 4 | 0 | 1 | 0 |
+| Kernel | 5 | 5 | 0 | 0 | 0 |
 | Networking | 3 | 2 | 1 | 0 | 0 |
 | Storage | 1 | 1 | 0 | 0 | 0 |
 | Runtime | 1 | 0 | 1 | 0 | 0 |
 | Accelerator | 5 | 4 | 0 | 0 | 1 |
-| **Total** | **15** | **11** | **2** | **1** | **1** |
+| **Total** | **15** | **12** | **2** | **0** | **1** |
 
 ## Key Findings
 
@@ -99,11 +99,16 @@ Simulations that create processes require `--keep-alive` flag. Without it, proce
 | `systemd-restarts` | `systemctl restart` doesn't increment NRestarts | Changed to SIGKILL approach |
 | `io-delay` | stress-ng doesn't cause measurable delay | Created sync write worker with fsync |
 
-### 4. Not Fixable
+### 4. Destructive Simulations (Use with Caution)
+
+| Simulation | Warning |
+|------------|---------|
+| `fork-oom` | **DESTRUCTIVE**: Exhausts node PIDs, node becomes unrecoverable and must be deleted/replaced |
+
+### 5. Limited Support
 
 | Simulation | Reason |
 |------------|--------|
-| `fork-oom` | NMA watches kubelet journal for `fork/exec.*resource temporarily unavailable`, not dmesg |
 | `routes-missing` | Requires actual pod IPs from IPAMD checkpoint; deleted gateway route doesn't trigger detection |
 
 ## Recommended Usage

@@ -61,9 +61,13 @@ hma-cli --node <node-name> kernel pid-exhaustion --keep-alive 30m --force
 # Inject kernel log patterns (dmesg injection, no --keep-alive needed)
 hma-cli --node <node-name> kernel kernel-bug --force    # Creates Warning event
 hma-cli --node <node-name> kernel soft-lockup --force   # Creates Warning event
+
+# Exhaust PIDs to cause kubelet fork failures - triggers KernelReady=False
+# WARNING: This may make the node unrecoverable and require node replacement!
+hma-cli --node <node-name> kernel fork-oom --force
 ```
 
-> **Note:** `fork-oom` is not supported because NMA watches kubelet journal for fork failures, not dmesg.
+> **Warning:** The `fork-oom` simulation exhausts node PIDs and may make the node unrecoverable. The node may need to be deleted and replaced after running this simulation. Only use on nodes you can afford to lose.
 
 ### Networking (`NetworkingReady` condition)
 
@@ -138,6 +142,7 @@ Some simulations create processes that must remain running for NMA to detect the
 | `pid-exhaustion` | Yes (30m recommended) | Sleep processes killed on pod exit |
 | `io-delay` | Yes (15m recommended) | Worker process killed; NMA checks every 10 min |
 | `systemd-restarts` | Yes (10m recommended) | Background kill script needs time to complete |
+| `fork-oom` | No | Instant effect, but **node may become unrecoverable** |
 | `kernel-bug` | No | Dmesg injection is instant |
 | `soft-lockup` | No | Dmesg injection is instant |
 | `ipamd-down` | No | Process kill is instant |
