@@ -77,9 +77,6 @@ hma-cli --node <node-name> networking ipamd-down --force
 
 # Bring down secondary ENI (eth1) - triggers NetworkingReady=False
 hma-cli --node <node-name> networking interface-down --force
-
-# Delete pod routes (requires pods with allocated IPs on the node)
-hma-cli --node <node-name> networking routes-missing --force
 ```
 
 ### Storage (`StorageReady` condition)
@@ -237,7 +234,7 @@ When using `--node`, the CLI:
 
 The NMA monitors:
 - **Kernel**: Zombie count (>=20), PID usage (>70%), dmesg patterns (`BUG:`, `soft lockup`)
-- **Networking**: IPAMD process, interface state, pod routes from IPAMD checkpoint
+- **Networking**: IPAMD process, interface state
 - **Storage**: Per-process I/O delay from `/proc/[PID]/stat` (>10s)
 - **Runtime**: systemd NRestarts counter via dbus (>3 and increasing)
 - **Accelerator**: NVIDIA XID errors via DCGM, Neuron errors via dmesg

@@ -28,7 +28,6 @@ Test Date: 2026-03-12
 |------------|------|--------|---------------|-------|
 | `ipamd-down` | Multiple | ✅ PASS | NetworkingReady=False | Kills aws-k8s-agent process |
 | `interface-down` | Multiple | ✅ PASS | NetworkingReady=False | `ip link set eth1 down` |
-| `routes-missing` | ip-10-0-5-100 | ⚠️ PARTIAL | Pending | Deleted gateway route; needs pod-specific routes from IPAMD |
 
 ### Storage Simulations
 
@@ -57,11 +56,11 @@ Test Date: 2026-03-12
 | Category | Total | Pass | Partial | Fail | Skipped |
 |----------|-------|------|---------|------|---------|
 | Kernel | 5 | 5 | 0 | 0 | 0 |
-| Networking | 3 | 2 | 1 | 0 | 0 |
+| Networking | 2 | 2 | 0 | 0 | 0 |
 | Storage | 1 | 1 | 0 | 0 | 0 |
 | Runtime | 1 | 0 | 1 | 0 | 0 |
 | Accelerator | 5 | 4 | 0 | 0 | 1 |
-| **Total** | **15** | **12** | **2** | **0** | **1** |
+| **Total** | **14** | **12** | **1** | **0** | **1** |
 
 ## Key Findings
 
@@ -105,11 +104,11 @@ Simulations that create processes require `--keep-alive` flag. Without it, proce
 |------------|---------|
 | `fork-oom` | **DESTRUCTIVE**: Exhausts node PIDs, node becomes unrecoverable and must be deleted/replaced |
 
-### 5. Limited Support
+### 5. Removed Simulations
 
-| Simulation | Reason |
-|------------|--------|
-| `routes-missing` | Requires actual pod IPs from IPAMD checkpoint; deleted gateway route doesn't trigger detection |
+| Simulation | Reason for Removal |
+|------------|-------------------|
+| `routes-missing` | Kubernetes auto-heals: deleting routes causes pods to restart, IPAMD reallocates IPs before NMA can detect |
 
 ## Recommended Usage
 
