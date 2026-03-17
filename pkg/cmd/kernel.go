@@ -62,15 +62,6 @@ func runKernelSimulator(cmd *cobra.Command, args []string) error {
 		Count:  kernelCount,
 	}
 
-	// Parse duration if provided
-	if duration != "" {
-		d, err := time.ParseDuration(duration)
-		if err != nil {
-			return fmt.Errorf("invalid duration: %w", err)
-		}
-		opts.Duration = d
-	}
-
 	ctx := context.Background()
 
 	// If --node is specified, run remotely
@@ -131,21 +122,6 @@ func runKernelSimulator(cmd *cobra.Command, args []string) error {
 	}
 
 	util.PrintResult(result.Success, result.Message, result.CleanupCmd)
-
-	// Handle auto-cleanup after duration
-	if opts.Duration > 0 && sim.IsReversible() {
-		fmt.Printf("Auto-cleanup scheduled in %s\n", opts.Duration)
-		time.AfterFunc(opts.Duration, func() {
-			fmt.Printf("\nAuto-cleanup triggered for %s\n", simName)
-			if err := sim.Cleanup(context.Background()); err != nil {
-				fmt.Printf("Auto-cleanup failed: %v\n", err)
-			} else {
-				fmt.Println("Auto-cleanup complete")
-			}
-		})
-		// Wait for duration + a bit more to let cleanup finish
-		time.Sleep(opts.Duration + time.Second)
-	}
 
 	return nil
 }

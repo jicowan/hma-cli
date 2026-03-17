@@ -50,14 +50,6 @@ func runStorageSimulator(cmd *cobra.Command, args []string) error {
 		DryRun: dryRun,
 	}
 
-	if duration != "" {
-		d, err := time.ParseDuration(duration)
-		if err != nil {
-			return fmt.Errorf("invalid duration: %w", err)
-		}
-		opts.Duration = d
-	}
-
 	ctx := context.Background()
 
 	// If --node is specified, run remotely

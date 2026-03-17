@@ -58,14 +58,6 @@ func runNetworkingSimulator(cmd *cobra.Command, args []string) error {
 		Target: networkTarget,
 	}
 
-	if duration != "" {
-		d, err := time.ParseDuration(duration)
-		if err != nil {
-			return fmt.Errorf("invalid duration: %w", err)
-		}
-		opts.Duration = d
-	}
-
 	ctx := context.Background()
 
 	// If --node is specified, run remotely

@@ -38,12 +38,11 @@ hma-cli --node <node-name> <category> <failure-type> [flags]
 | Flag | Description |
 |------|-------------|
 | `--node` | **Required.** Target node name (creates privileged pod automatically) |
-| `--keep-alive` | Keep simulation running for duration (e.g., `30m`). **Required for process-based simulations.** |
+| `--keep-alive` | Keep pod alive for duration (e.g., `30m`). **Required for process-based simulations.** |
 | `--kubeconfig` | Path to kubeconfig (default: ~/.kube/config) |
 | `--dry-run` | Show what would happen without executing |
-| `--duration` | Auto-cleanup after duration (e.g., `5m`) |
 | `--force` | Skip confirmation prompts |
-| `--cleanup` | Revert a previous simulation |
+| `--cleanup` | Revert simulation. **Needed for: `pid-exhaustion`, `interface-down`** |
 
 ## Available Simulations
 
@@ -129,22 +128,24 @@ hma-cli diagnose --node <node-name> --status
 hma-cli diagnose --node <node-name> --destination "https://..." --wait --delete
 ```
 
-## Understanding `--keep-alive`
+## Understanding `--keep-alive` and `--cleanup`
 
 Some simulations create processes that must remain running for NMA to detect them. Without `--keep-alive`, the node-shell pod is deleted immediately after running the command, which kills all child processes.
 
-| Simulation | Needs `--keep-alive` | Reason |
-|------------|---------------------|--------|
-| `zombies` | Yes (30m recommended) | Zombie processes killed on pod exit |
-| `pid-exhaustion` | Yes (30m recommended) | Sleep processes killed on pod exit |
-| `io-delay` | Yes (15m recommended) | Worker process killed; NMA checks every 10 min |
-| `systemd-restarts` | Yes (10m recommended) | Background kill script needs time to complete |
-| `fork-oom` | No | Instant effect, but **node may become unrecoverable** |
-| `kernel-bug` | No | Dmesg injection is instant |
-| `soft-lockup` | No | Dmesg injection is instant |
-| `ipamd-down` | No | Process kill is instant |
-| `interface-down` | No | Interface state change is instant |
-| `neuron-*` | No | Dmesg injection is instant |
+Some simulations modify persistent system state that survives pod deletion. Use `--cleanup` to revert these changes.
+
+| Simulation | Needs `--keep-alive` | Needs `--cleanup` | Notes |
+|------------|---------------------|-------------------|-------|
+| `zombies` | Yes (30m) | No | Processes die with pod |
+| `pid-exhaustion` | Yes (30m) | **Yes** | Lowered pid_max persists |
+| `io-delay` | Yes (15m) | No | Worker dies with pod |
+| `systemd-restarts` | Yes (10m) | No | Kubelet auto-restarts |
+| `fork-oom` | No | No | **Node may be unrecoverable** |
+| `kernel-bug` | No | No | Dmesg injection is instant |
+| `soft-lockup` | No | No | Dmesg injection is instant |
+| `ipamd-down` | No | No | Systemd auto-restarts |
+| `interface-down` | No | **Yes** | Interface stays down |
+| `neuron-*` | No | No | Dmesg can't be cleaned |
 
 ## Examples
 
@@ -164,12 +165,17 @@ hma-cli --node <node-name> kernel zombies --dry-run
 
 ### Manual Cleanup
 
-Revert a simulation manually:
+Cleanup is only needed for simulations that modify persistent system state:
 
 ```bash
-hma-cli --node <node-name> kernel zombies --cleanup --force
+# Restore pid_max and threads-max after pid-exhaustion
+hma-cli --node <node-name> kernel pid-exhaustion --cleanup --force
+
+# Bring interface back up after interface-down
 hma-cli --node <node-name> networking interface-down --cleanup --force
 ```
+
+For other simulations, the pod exit handles cleanup automatically.
 
 ## Verification
 

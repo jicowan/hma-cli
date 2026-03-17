@@ -2,7 +2,6 @@ package simulator
 
 import (
 	"context"
-	"time"
 )
 
 // Category represents the health check category
@@ -20,9 +19,6 @@ const (
 type Options struct {
 	// Force skips confirmation prompts
 	Force bool
-
-	// Duration specifies auto-cleanup duration
-	Duration time.Duration
 
 	// DryRun shows what would happen without executing
 	DryRun bool
