@@ -71,10 +71,12 @@ hma-cli --node <node-name> kernel fork-oom --force
 ### Networking (`NetworkingReady` condition)
 
 ```bash
-# Kill IPAMD process - triggers NetworkingReady=False
-hma-cli --node <node-name> networking ipamd-down --force
+# Kill IPAMD repeatedly (NMA requires 5 restarts to trigger condition)
+# Requires --keep-alive to allow background kill loop to run
+hma-cli --node <node-name> networking ipamd-down --keep-alive 10m --force
 
-# Bring down secondary ENI (eth1) - triggers NetworkingReady=False
+# Bring down secondary ENI (auto-detects eth1/ens6)
+# Note: May not trigger NMA condition change in all configurations
 hma-cli --node <node-name> networking interface-down --force
 ```
 
@@ -149,8 +151,8 @@ Some simulations modify persistent system state that survives pod deletion. Use 
 | `fork-oom` | No | No | **Node may be unrecoverable** |
 | `kernel-bug` | No | No | Dmesg injection is instant |
 | `soft-lockup` | No | No | Dmesg injection is instant |
-| `ipamd-down` | No | No | Systemd auto-restarts |
-| `interface-down` | No | **Yes** | Interface stays down |
+| `ipamd-down` | Yes (10m) | No | NMA needs 5 restarts (MinOccurrences) |
+| `interface-down` | No | **Yes** | Auto-detects eth1/ens6 |
 | `neuron-*` | No | No | Dmesg can't be cleaned |
 
 ## Examples

@@ -24,7 +24,7 @@ for testing the EKS Node Health Monitoring Agent (NMA).
 IMPORTANT: The --node flag is REQUIRED for all simulations. The CLI creates a
 privileged pod on the target node to execute commands.
 
-For process-based simulations (zombies, pid-exhaustion, io-delay, systemd-restarts),
+For process-based simulations (zombies, pid-exhaustion, io-delay, systemd-restarts, ipamd-down),
 use --keep-alive to prevent processes from being killed when the pod exits.
 
 Available categories:
@@ -41,8 +41,11 @@ The tool can also create NodeDiagnostic CRs to collect node logs (diagnose comma
   # Inject kernel bug message to dmesg (instant, no --keep-alive needed)
   hma-cli --node ip-10-0-1-123.ec2.internal kernel kernel-bug --force
 
-  # Bring down secondary ENI
+  # Bring down secondary ENI (auto-detects eth1/ens6)
   hma-cli --node ip-10-0-1-123.ec2.internal networking interface-down --force
+
+  # Kill IPAMD repeatedly (NMA requires 5 restarts)
+  hma-cli --node ip-10-0-1-123.ec2.internal networking ipamd-down --keep-alive 10m --force
 
   # Dry run to see what would happen
   hma-cli --node ip-10-0-1-123.ec2.internal kernel zombies --dry-run
@@ -68,5 +71,5 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Show what would happen without executing")
 	rootCmd.PersistentFlags().BoolVar(&force, "force", false, "Skip confirmation prompts")
 	rootCmd.PersistentFlags().BoolVar(&cleanup, "cleanup", false, "Revert simulation (needed for: pid-exhaustion, interface-down)")
-	rootCmd.PersistentFlags().StringVar(&keepAlive, "keep-alive", "", "Keep pod alive for duration (REQUIRED for: zombies, pid-exhaustion, io-delay, systemd-restarts)")
+	rootCmd.PersistentFlags().StringVar(&keepAlive, "keep-alive", "", "Keep pod alive for duration (REQUIRED for: zombies, pid-exhaustion, io-delay, systemd-restarts, ipamd-down)")
 }
