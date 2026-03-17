@@ -113,11 +113,11 @@ func (s *SystemdSimulator) ShellCommand(opts simulator.Options) []string {
 	// auto-restarts a service after it FAILS. Using 'systemctl restart' does NOT
 	// increment NRestarts - we must KILL the process to cause a failure.
 	//
-	// NMA threshold: currentRestarts > 3 && currentRestarts > previousRestarts
-	script := fmt.Sprintf(`#!/bin/sh
-echo "=== SystemD NRestarts Simulation ==="
+	// Runs in FOREGROUND - requires --keep-alive
+	script := fmt.Sprintf(`echo "=== SystemD NRestarts Simulation ==="
 echo "NMA checks dbus NRestarts property every 5 minutes"
 echo "Threshold: NRestarts > 3 AND increasing"
+echo "Runs in FOREGROUND - use --keep-alive 10m or longer"
 echo ""
 echo "IMPORTANT: 'systemctl restart' does NOT increment NRestarts!"
 echo "We must KILL the process to trigger systemd's auto-restart."
@@ -125,7 +125,6 @@ echo ""
 
 SERVICE="%s"
 COUNT=%d
-LOG=/tmp/systemd-restarts.log
 
 # Check current NRestarts
 get_nrestarts() {
@@ -138,64 +137,46 @@ INITIAL_RESTARTS=$(get_nrestarts)
 echo "Current NRestarts for $SERVICE: ${INITIAL_RESTARTS:-0}"
 echo ""
 
-# Create kill script that runs in background
-cat > /tmp/do-kills.sh << 'KILLSCRIPT'
-#!/bin/sh
-SERVICE=$1
-COUNT=$2
-LOG=$3
-echo "$(date): Starting $COUNT process kills for $SERVICE" >> "$LOG"
 i=1
 while [ "$i" -le "$COUNT" ]; do
   # Get the main PID of the service
   MAIN_PID=$(systemctl show -p MainPID "$SERVICE" --value 2>/dev/null)
   if [ -z "$MAIN_PID" ] || [ "$MAIN_PID" = "0" ]; then
-    echo "$(date): Waiting for $SERVICE to start..." >> "$LOG"
+    echo "  Waiting for $SERVICE to start..."
     sleep 5
     continue
   fi
 
-  echo "$(date): Killing $SERVICE (PID: $MAIN_PID) - attempt $i/$COUNT" >> "$LOG"
-
-  # Kill the process - this causes systemd to auto-restart and increment NRestarts
+  echo "  [$(date '+%%H:%%M:%%S')] Killing $SERVICE (PID: $MAIN_PID) - attempt $i/$COUNT"
   kill -9 "$MAIN_PID" 2>/dev/null
 
   # Wait for service to restart
   sleep 15
 
-  # Check NRestarts
-  NRESTARTS=$(busctl get-property org.freedesktop.systemd1 \
-    "/org/freedesktop/systemd1/unit/${SERVICE}_2eservice" \
-    org.freedesktop.systemd1.Service NRestarts 2>/dev/null | awk '{print $2}')
-  echo "$(date): NRestarts now: ${NRESTARTS:-unknown}" >> "$LOG"
+  NRESTARTS=$(get_nrestarts)
+  echo "  NRestarts now: ${NRESTARTS:-unknown}"
 
   i=$((i + 1))
 done
-echo "$(date): Completed $COUNT kills" >> "$LOG"
 
-# Final status
-FINAL_RESTARTS=$(busctl get-property org.freedesktop.systemd1 \
-  "/org/freedesktop/systemd1/unit/${SERVICE}_2eservice" \
-  org.freedesktop.systemd1.Service NRestarts 2>/dev/null | awk '{print $2}')
-echo "$(date): Final NRestarts: ${FINAL_RESTARTS:-unknown}" >> "$LOG"
-if [ "${FINAL_RESTARTS:-0}" -gt 3 ]; then
-  echo "$(date): SUCCESS - NRestarts > 3, NMA should detect RepeatedRestart" >> "$LOG"
-else
-  echo "$(date): WARNING - NRestarts (${FINAL_RESTARTS:-0}) <= 3, may need more kills" >> "$LOG"
-fi
-KILLSCRIPT
-chmod +x /tmp/do-kills.sh
-
-# Run in background
-echo "Starting kill process in background..."
-rm -f "$LOG"
-setsid /tmp/do-kills.sh "$SERVICE" "$COUNT" "$LOG" </dev/null >/dev/null 2>&1 &
-BGPID=$!
-echo "Kill script started (PID: $BGPID)"
-echo "Monitor: tail -f $LOG"
 echo ""
-sleep 3
-cat "$LOG" 2>/dev/null || echo "Waiting for first kill..."`, service, restartCount)
+FINAL_RESTARTS=$(get_nrestarts)
+echo "Final NRestarts: ${FINAL_RESTARTS:-unknown}"
+if [ "${FINAL_RESTARTS:-0}" -gt 3 ]; then
+  echo "SUCCESS: NRestarts > 3, NMA should detect RepeatedRestart"
+else
+  echo "WARNING: NRestarts (${FINAL_RESTARTS:-0}) <= 3, may need more kills"
+fi
+
+echo ""
+echo "Keeping pod alive for NMA to detect..."
+echo "Press Ctrl+C or wait for --keep-alive to expire."
+
+while true; do
+  sleep 60
+  CURRENT=$(get_nrestarts)
+  echo "  [$(date '+%%H:%%M:%%S')] NRestarts: ${CURRENT:-unknown}"
+done`, service, restartCount)
 	return []string{script}
 }
 

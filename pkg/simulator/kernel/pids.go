@@ -111,9 +111,11 @@ func (p *PIDExhaustionSimulator) IsReversible() bool {
 func (p *PIDExhaustionSimulator) ShellCommand(opts simulator.Options) []string {
 	// NMA uses MAX(kernel.pid_max, kernel.threads-max) as the denominator
 	// We need to lower BOTH to make the 70% threshold achievable
-	// Process creation must persist - use nohup and trap to prevent cleanup
-	script := `#!/bin/sh
-set -e
+	// Runs in FOREGROUND - keeps pod alive to maintain processes
+	script := `echo "=== PID Exhaustion Simulation ==="
+echo "NMA threshold: > 70% of MAX(pid_max, threads-max)"
+echo "Runs in FOREGROUND - use --keep-alive to maintain processes"
+echo ""
 
 ORIG_PID_MAX=$(cat /proc/sys/kernel/pid_max)
 ORIG_THREADS_MAX=$(cat /proc/sys/kernel/threads-max)
@@ -130,7 +132,6 @@ echo "Original pid_max: $ORIG_PID_MAX, threads-max: $ORIG_THREADS_MAX"
 echo "NMA effective max: $EFFECTIVE_MAX, Current PIDs: $CURRENT_PIDS"
 
 # Calculate a new limit that puts us close to but below 70%
-# We want current_pids to be ~60% so we have room to add more
 NEW_LIMIT=$(( CURRENT_PIDS * 100 / 60 ))
 
 # Ensure new limit is reasonable (at least current + 1000)
@@ -157,34 +158,23 @@ if [ "$TO_CREATE" -le 0 ]; then
 fi
 
 echo "Creating $TO_CREATE sleeping processes..."
-
-# Create a helper script that spawns persistent sleep processes
-# Using exec to replace shell and prevent process tree cleanup
-cat > /tmp/spawn_sleepers.sh << 'SPAWNER'
-#!/bin/sh
-COUNT=$1
 CREATED=0
-while [ "$CREATED" -lt "$COUNT" ]; do
-  # Use nohup to detach from terminal, redirect to /dev/null
-  nohup sleep 86400 >/dev/null 2>&1 &
+# Store child PIDs so we can wait on them
+PIDS=""
+while [ "$CREATED" -lt "$TO_CREATE" ]; do
+  sleep 86400 &
+  PIDS="$PIDS $!"
   CREATED=$((CREATED + 1))
-  # Print progress every 500
   if [ $((CREATED % 500)) -eq 0 ]; then
     echo "  Created $CREATED processes..."
   fi
 done
 echo "  Created $CREATED total processes"
-SPAWNER
-chmod +x /tmp/spawn_sleepers.sh
-
-# Run the spawner
-/tmp/spawn_sleepers.sh "$TO_CREATE"
 
 sleep 2
 NEW_COUNT=$(ls -d /proc/[0-9]* 2>/dev/null | wc -l)
 NEW_PID_MAX_NOW=$(cat /proc/sys/kernel/pid_max)
 NEW_THREADS_MAX_NOW=$(cat /proc/sys/kernel/threads-max)
-# NMA uses MAX of the two
 if [ "$NEW_PID_MAX_NOW" -gt "$NEW_THREADS_MAX_NOW" ]; then
   NMA_EFFECTIVE=$NEW_PID_MAX_NOW
 else
@@ -192,13 +182,27 @@ else
 fi
 USAGE_PCT=$(( NEW_COUNT * 100 / NMA_EFFECTIVE ))
 
+echo ""
 echo "PID usage now: $NEW_COUNT/$NMA_EFFECTIVE (${USAGE_PCT}%)"
 echo "(pid_max: $NEW_PID_MAX_NOW, threads-max: $NEW_THREADS_MAX_NOW)"
 if [ "$USAGE_PCT" -ge 70 ]; then
   echo "SUCCESS: PID usage exceeds NMA threshold (>= 70%)"
 else
   echo "WARNING: PID usage ${USAGE_PCT}% is below 70% threshold"
-fi`
+fi
+
+echo ""
+echo "Keeping processes alive..."
+echo "Press Ctrl+C or wait for --keep-alive to expire."
+echo "IMPORTANT: Run --cleanup to restore pid_max/threads-max"
+
+# Keep running and report status periodically
+while true; do
+  sleep 60
+  CURRENT=$(ls -d /proc/[0-9]* 2>/dev/null | wc -l)
+  PCT=$(( CURRENT * 100 / NMA_EFFECTIVE ))
+  echo "  [$(date '+%H:%M:%S')] PIDs: $CURRENT/$NMA_EFFECTIVE (${PCT}%)"
+done`
 	return []string{script}
 }
 

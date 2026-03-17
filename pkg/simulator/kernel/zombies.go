@@ -88,44 +88,60 @@ func (z *ZombieSimulator) ShellCommand(opts simulator.Options) []string {
 	if count == 0 {
 		count = DefaultZombieCount
 	}
-	// Create zombie processes using perl (most reliable and commonly available)
-	// Use setsid to create a new session so the process survives pod termination
-	script := fmt.Sprintf(`before=$(ps -eo stat 2>/dev/null | grep "^Z" | wc -l)
+	// Create zombie processes and keep running in FOREGROUND
+	// Requires --keep-alive to maintain the zombies
+	// Uses shell script that forks children which exit immediately
+	script := fmt.Sprintf(`echo "=== Zombie Process Simulation ==="
+echo "NMA threshold: >= 20 zombies"
+echo "Runs in FOREGROUND - use --keep-alive to maintain zombies"
+echo ""
+
+count_zombies() {
+  ps -eo stat 2>/dev/null | grep -c "^Z" || echo 0
+}
+
+before=$(count_zombies)
 echo "Zombies before: $before"
+echo "Creating %d zombie processes..."
 
-if command -v perl >/dev/null 2>&1; then
-  echo "Creating %d zombie processes using perl..."
-  # Use setsid to detach from the pod's process group (if available)
-  if command -v setsid >/dev/null 2>&1; then
-    setsid perl -e 'for(1..%d){fork or exit 0}sleep 86400' </dev/null >/dev/null 2>&1 &
-  else
-    nohup perl -e 'for(1..%d){fork or exit 0}sleep 86400' </dev/null >/dev/null 2>&1 &
-  fi
-  sleep 3
-elif command -v python3 >/dev/null 2>&1; then
-  echo "Creating %d zombie processes using python3..."
-  python3 -c "
-import os, time
-for i in range(%d):
-    if os.fork() == 0:
-        os._exit(0)
-time.sleep(86400)
-" &
-  sleep 3
-else
-  echo "ERROR: Neither perl nor python3 found. Cannot create zombies reliably."
-  exit 1
-fi
+# Create a child script that forks zombies and then sleeps forever
+# The parent shell will wait on this, keeping the pod alive
+cat > /tmp/zombie_parent.sh << 'ZSCRIPT'
+#!/bin/sh
+# Fork the requested number of children that exit immediately
+# Since parent doesn't wait(), they become zombies
+COUNT=$1
+i=0
+while [ $i -lt $COUNT ]; do
+  # Fork a child that exits immediately
+  ( exit 0 ) &
+  i=$((i + 1))
+done
 
-after=$(ps -eo stat 2>/dev/null | grep "^Z" | wc -l)
-created=$((after - before))
-
-echo "Zombies after: $after (created: $created)"
-if [ "$after" -ge 20 ]; then
+# Report status
+sleep 2
+AFTER=$(ps -eo stat 2>/dev/null | grep -c "^Z" || echo 0)
+echo "Zombies after: $AFTER"
+if [ "$AFTER" -ge 20 ]; then
   echo "SUCCESS: Zombie count exceeds NMA threshold (>= 20)"
 else
-  echo "NOTE: Zombie count is below NMA threshold (>= 20)"
-fi`, count, count, count, count, count)
+  echo "NOTE: Zombie count below threshold"
+fi
+echo ""
+echo "Keeping parent alive to maintain zombies..."
+echo "Press Ctrl+C or wait for --keep-alive to expire."
+
+# Loop forever, reporting status
+while true; do
+  sleep 60
+  CURRENT=$(ps -eo stat 2>/dev/null | grep -c "^Z" || echo 0)
+  echo "  [$(date '+%%H:%%M:%%S')] Zombie count: $CURRENT"
+done
+ZSCRIPT
+chmod +x /tmp/zombie_parent.sh
+
+# Run the zombie parent script (blocks until killed)
+exec /tmp/zombie_parent.sh %d`, count, count)
 	return []string{script}
 }
 

@@ -88,72 +88,38 @@ func (i *IOSimulator) ShellCommand(opts simulator.Options) []string {
 	// time spent waiting for block I/O in centiseconds. It compares the delta
 	// between checks (every 10 min) and triggers if delta >= 10 seconds.
 	//
-	// We create a long-running process that does synchronous writes with fsync
-	// to accumulate significant I/O wait time in the kernel accounting.
+	// Runs in FOREGROUND - requires --keep-alive (recommend 15m+)
 	return []string{
-		`#!/bin/sh
-set -e
+		`echo "=== I/O Delay Simulation ==="
+echo "NMA checks /proc/PID/stat column 42 every 10 minutes"
+echo "Threshold: >10 seconds of I/O wait time between checks"
+echo "Runs in FOREGROUND - use --keep-alive 15m or longer"
+echo ""
 
 TESTDIR=/tmp/io-delay-test
-PIDFILE=/tmp/io-delay-test.pid
 mkdir -p "$TESTDIR"
 
-echo "Creating I/O delay test process..."
-echo "NMA checks /proc/PID/stat column 42 (delayacct_blkio_ticks) every 10 minutes"
-echo "Process needs to accumulate >10 seconds of I/O wait time between checks"
+MYPID=$$
+echo "Worker PID: $MYPID"
+echo "Starting continuous synchronous I/O writes..."
+echo ""
 
-# Create a script that does continuous synchronous I/O
-cat > /tmp/io_delay_worker.sh << 'WORKER'
-#!/bin/sh
-# This worker does continuous synchronous writes to accumulate I/O delay
-# The delayacct_blkio_ticks counter increments when the process is blocked on I/O
-TESTDIR=/tmp/io-delay-test
 COUNTER=0
 while true; do
   # Write 64MB with fdatasync to force synchronous I/O
-  # This blocks until data is physically written to disk
   dd if=/dev/zero of="$TESTDIR/iotest_$COUNTER" bs=1M count=64 conv=fdatasync 2>/dev/null
-
-  # Force additional sync
   sync
-
-  # Remove and recreate to prevent disk fill
   rm -f "$TESTDIR/iotest_$COUNTER"
 
   COUNTER=$((COUNTER + 1))
   if [ $((COUNTER % 10)) -eq 0 ]; then
-    # Check our I/O delay accumulation every 10 iterations
-    MYPID=$$
     if [ -f "/proc/$MYPID/stat" ]; then
-      # Column 42 is delayacct_blkio_ticks (0-indexed: 41)
-      DELAY=$(cat "/proc/$MYPID/stat" | awk '{print $42}')
+      DELAY=$(awk '{print $42}' "/proc/$MYPID/stat")
       DELAY_SEC=$((DELAY / 100))
-      echo "I/O delay accumulated: ${DELAY_SEC}s (${DELAY} centiseconds)"
+      echo "  [$(date '+%H:%M:%S')] I/O delay: ${DELAY_SEC}s (${DELAY} centiseconds) - iteration $COUNTER"
     fi
   fi
-done
-WORKER
-chmod +x /tmp/io_delay_worker.sh
-
-# Run the worker in background, detached
-nohup /tmp/io_delay_worker.sh > /tmp/io-delay-test.log 2>&1 &
-WORKER_PID=$!
-echo "$WORKER_PID" > "$PIDFILE"
-
-echo "Started I/O delay worker (PID: $WORKER_PID)"
-echo "Log file: /tmp/io-delay-test.log"
-echo ""
-echo "NMA checks every 10 minutes. Wait for at least one check cycle."
-echo "Monitor with: tail -f /tmp/io-delay-test.log"
-echo "Check process I/O delay: cat /proc/$WORKER_PID/stat | awk '{print \$42}'"
-
-# Wait a moment and show initial status
-sleep 3
-if [ -f "/proc/$WORKER_PID/stat" ]; then
-  INITIAL_DELAY=$(cat "/proc/$WORKER_PID/stat" | awk '{print $42}')
-  echo ""
-  echo "Initial I/O delay ticks: $INITIAL_DELAY ($(( INITIAL_DELAY / 100 )) seconds)"
-fi`,
+done`,
 	}
 }
 

@@ -75,40 +75,51 @@ func (i *IPAMDSimulator) IsReversible() bool {
 func (i *IPAMDSimulator) ShellCommand(opts simulator.Options) []string {
 	// Use [a]ws pattern to avoid matching the pgrep/pkill command itself
 	// Kill repeatedly to trigger NMA's "IPAMDRepeatedlyRestart" detection (needs 5 occurrences)
+	// Runs in FOREGROUND - requires --keep-alive to keep pod running
 	return []string{
-		`pid=$(pgrep -f '[a]ws-k8s-agent' 2>/dev/null | head -1)
-if [ -n "$pid" ]; then
-  kill -9 $pid 2>/dev/null
-  echo "IPAMD (aws-k8s-agent) process $pid killed initially."
+		`echo "Starting IPAMD killer loop (runs in foreground, use --keep-alive)"
+echo "NMA requires 5 restarts to trigger condition change"
+echo ""
 
-  # Start background loop to keep killing IPAMD every 60s
-  # NMA needs 5 restarts to trigger condition change
-  nohup sh -c '
-    count=0
-    while true; do
-      sleep 60
-      pid=$(pgrep -f "[a]ws-k8s-agent" 2>/dev/null | head -1)
-      if [ -n "$pid" ]; then
-        kill -9 $pid 2>/dev/null
-        count=$((count + 1))
-        echo "$(date): Killed IPAMD (restart #$count)" >> /tmp/ipamd-kills.log
-      fi
-    done
-  ' > /dev/null 2>&1 &
-  echo "Started background loop to kill IPAMD every 60s (PID: $!)"
-  echo "Kill log: /tmp/ipamd-kills.log"
-else
-  echo "WARNING: IPAMD (aws-k8s-agent) process not found. Is VPC CNI running on this node?"
-fi`,
+count=0
+while [ $count -lt 10 ]; do
+  pid=$(pgrep -f '[a]ws-k8s-agent' 2>/dev/null | head -1)
+  if [ -n "$pid" ]; then
+    kill -9 $pid 2>/dev/null
+    count=$((count + 1))
+    echo "$(date): Killed IPAMD process $pid (kill #$count)"
+  else
+    echo "$(date): IPAMD not running, waiting..."
+  fi
+
+  if [ $count -lt 10 ]; then
+    echo "  Sleeping 60s before next kill..."
+    sleep 60
+  fi
+done
+
+echo ""
+echo "Completed $count IPAMD kills. NMA should have detected IPAMDRepeatedlyRestart."`,
 	}
 }
 
 func (i *IPAMDSimulator) CleanupCommand() []string {
 	return []string{
-		// Kill the background loop first, then restart IPAMD
-		"pkill -f 'while true.*aws-k8s-agent' 2>/dev/null || true",
-		"rm -f /tmp/ipamd-kills.log 2>/dev/null || true",
-		"systemctl restart aws-k8s-agent || echo 'Could not restart aws-k8s-agent service'",
+		// No cleanup needed - IPAMD auto-restarts via systemd
+		// Just confirm it's running
+		`pid=$(pgrep -f '[a]ws-k8s-agent' 2>/dev/null | head -1)
+if [ -n "$pid" ]; then
+  echo "IPAMD is running (PID: $pid)"
+else
+  echo "IPAMD not running - waiting for systemd to restart it..."
+  sleep 5
+  pid=$(pgrep -f '[a]ws-k8s-agent' 2>/dev/null | head -1)
+  if [ -n "$pid" ]; then
+    echo "IPAMD restarted (PID: $pid)"
+  else
+    echo "WARNING: IPAMD still not running"
+  fi
+fi`,
 	}
 }
 

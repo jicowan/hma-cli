@@ -138,7 +138,7 @@ aws s3 cp s3://my-logs-bucket/2026-03-17T15-30-00Z/ip-10-0-1-123.ec2.internal/lo
 
 ## Understanding `--keep-alive` and `--cleanup`
 
-Some simulations create processes that must remain running for NMA to detect them. Without `--keep-alive`, the node-shell pod is deleted immediately after running the command, which kills all child processes.
+Many simulations run in the **foreground** and require `--keep-alive` to keep the node-shell pod running. The simulation runs continuously until the keep-alive duration expires or you press Ctrl+C.
 
 Some simulations modify persistent system state that survives pod deletion. Use `--cleanup` to revert these changes.
 
