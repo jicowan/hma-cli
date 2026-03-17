@@ -7,15 +7,17 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jicowan/hma-cli/pkg/aws"
 	"github.com/jicowan/hma-cli/pkg/diagnose"
 )
 
 var (
-	destination   string
+	bucket        string
 	wait          bool
 	deleteAfter   bool
 	statusOnly    bool
 	waitTimeout   time.Duration
+	presignExpiry time.Duration
 )
 
 var diagnoseCmd = &cobra.Command{
@@ -23,30 +25,34 @@ var diagnoseCmd = &cobra.Command{
 	Short: "Create NodeDiagnostic CR to collect node logs",
 	Long: `Create a NodeDiagnostic custom resource to trigger log collection from an EKS node.
 
-The NodeDiagnostic CR will instruct the node monitoring agent to collect logs and upload
-them to the specified destination URL (typically a pre-signed S3 URL).
+The NodeDiagnostic CR instructs the node monitoring agent to collect logs and upload
+them to an S3 bucket. The CLI automatically generates a presigned PUT URL.
+
+The S3 key format is: <timestamp>/<node-name>/logs.tar.gz
+Example: 2026-03-17T15-30-00Z/ip-10-0-1-123.ec2.internal/logs.tar.gz
 
 Examples:
   # Create NodeDiagnostic to collect logs
-  hma-cli diagnose --node ip-10-0-1-123.ec2.internal --destination "https://mybucket.s3.amazonaws.com/logs.tar.gz?..."
+  hma-cli diagnose --node ip-10-0-1-123.ec2.internal --bucket my-logs-bucket
 
   # Create and wait for completion
-  hma-cli diagnose --node my-node --destination "https://..." --wait
+  hma-cli diagnose --node my-node --bucket my-logs-bucket --wait
 
   # Check status of existing NodeDiagnostic
   hma-cli diagnose --node my-node --status
 
   # Create, wait, then delete the CR
-  hma-cli diagnose --node my-node --destination "https://..." --wait --delete`,
+  hma-cli diagnose --node my-node --bucket my-logs-bucket --wait --delete`,
 	RunE: runDiagnose,
 }
 
 func init() {
-	diagnoseCmd.Flags().StringVar(&destination, "destination", "", "Pre-signed S3 URL for log upload (required unless --status)")
+	diagnoseCmd.Flags().StringVar(&bucket, "bucket", "", "S3 bucket for log upload (required unless --status)")
 	diagnoseCmd.Flags().BoolVar(&wait, "wait", false, "Wait for log collection to complete")
 	diagnoseCmd.Flags().BoolVar(&deleteAfter, "delete", false, "Delete the NodeDiagnostic CR after completion")
 	diagnoseCmd.Flags().BoolVar(&statusOnly, "status", false, "Check status of existing NodeDiagnostic")
 	diagnoseCmd.Flags().DurationVar(&waitTimeout, "timeout", 5*time.Minute, "Timeout when waiting for completion")
+	diagnoseCmd.Flags().DurationVar(&presignExpiry, "presign-expiry", time.Hour, "Presigned URL expiry duration")
 
 	rootCmd.AddCommand(diagnoseCmd)
 }
@@ -68,10 +74,19 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 		return checkStatus(ctx, client)
 	}
 
-	// Create requires destination
-	if destination == "" {
-		return fmt.Errorf("--destination is required (pre-signed S3 URL)")
+	// Create requires bucket
+	if bucket == "" {
+		return fmt.Errorf("--bucket is required")
 	}
+
+	// Generate presigned URL
+	s3Key := aws.GenerateLogKey(nodeName)
+	destination, err := aws.GeneratePresignedPutURL(ctx, bucket, s3Key, presignExpiry)
+	if err != nil {
+		return fmt.Errorf("failed to generate presigned URL: %w", err)
+	}
+
+	fmt.Printf("Generated presigned URL for s3://%s/%s\n", bucket, s3Key)
 
 	// Check if already exists
 	exists, err := client.Exists(ctx, nodeName)
@@ -100,7 +115,7 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 		fmt.Println("DRY RUN: Would create NodeDiagnostic CR")
 		fmt.Println()
 		fmt.Printf("  Node: %s\n", nodeName)
-		fmt.Printf("  Destination: %s\n", destination)
+		fmt.Printf("  S3 Location: s3://%s/%s\n", bucket, s3Key)
 		fmt.Println()
 		fmt.Println("YAML that would be applied:")
 		fmt.Printf(`
@@ -110,8 +125,8 @@ metadata:
   name: %s
 spec:
   logCapture:
-    destination: %s
-`, nodeName, destination)
+    destination: <presigned-url-for-s3://%s/%s>
+`, nodeName, bucket, s3Key)
 		return nil
 	}
 
@@ -132,6 +147,11 @@ spec:
 		fmt.Printf("Status: %s\n", status.Phase)
 		if status.Message != "" {
 			fmt.Printf("Message: %s\n", status.Message)
+		}
+
+		if status.Phase == "Success" || status.Phase == "SuccessWithErrors" {
+			fmt.Printf("\nLogs uploaded to: s3://%s/%s\n", bucket, s3Key)
+			fmt.Printf("Download with: aws s3 cp s3://%s/%s ./logs.tar.gz\n", bucket, s3Key)
 		}
 	}
 

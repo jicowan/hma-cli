@@ -111,21 +111,27 @@ hma-cli --node <node-name> accelerator neuron-dma-error --force
 
 ### NodeDiagnostic (Log Collection)
 
-Create a `NodeDiagnostic` CR to collect logs from a node:
+Create a `NodeDiagnostic` CR to collect logs from a node. The CLI auto-generates a presigned S3 PUT URL.
 
 ```bash
-# Create NodeDiagnostic CR
-hma-cli diagnose --node <node-name> \
-  --destination "https://mybucket.s3.amazonaws.com/logs.tar.gz?X-Amz-..."
+# Create NodeDiagnostic CR (auto-generates presigned URL)
+hma-cli diagnose --node <node-name> --bucket my-logs-bucket
 
 # Wait for completion
-hma-cli diagnose --node <node-name> --destination "https://..." --wait
+hma-cli diagnose --node <node-name> --bucket my-logs-bucket --wait
 
-# Check status
+# Check status of existing NodeDiagnostic
 hma-cli diagnose --node <node-name> --status
 
 # Create, wait, then delete
-hma-cli diagnose --node <node-name> --destination "https://..." --wait --delete
+hma-cli diagnose --node <node-name> --bucket my-logs-bucket --wait --delete
+```
+
+The logs are uploaded to: `s3://<bucket>/<timestamp>/<node-name>/logs.tar.gz`
+
+After completion, download with:
+```bash
+aws s3 cp s3://my-logs-bucket/2026-03-17T15-30-00Z/ip-10-0-1-123.ec2.internal/logs.tar.gz ./logs.tar.gz
 ```
 
 ## Understanding `--keep-alive` and `--cleanup`

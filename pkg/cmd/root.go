@@ -50,6 +50,9 @@ The tool can also create NodeDiagnostic CRs to collect node logs (diagnose comma
   # Cleanup (needed for: pid-exhaustion, interface-down)
   hma-cli --node ip-10-0-1-123.ec2.internal networking interface-down --cleanup --force
 
+  # Collect node logs (auto-generates presigned S3 URL)
+  hma-cli diagnose --node ip-10-0-1-123.ec2.internal --bucket my-logs-bucket --wait
+
   # List all available simulations
   hma-cli list`,
 }
